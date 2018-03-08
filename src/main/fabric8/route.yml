@@ -1,0 +1,8 @@
+metadata:
+  name: camel-xml-swagger-contract-first
+spec:
+  port:
+    targetPort: http
+  to:
+    kind: Service
+    name: camel-xml-swagger-contract-first

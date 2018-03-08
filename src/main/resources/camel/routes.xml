@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+~ Licensed under the Apache License, Version 2.0 (the "License");
+~ you may not use this file except in compliance with the License.
+~ You may obtain a copy of the License at
+~
+~    http://www.apache.org/licenses/LICENSE-2.0
+~
+~ Unless required by applicable law or agreed to in writing, software
+~ distributed under the License is distributed on an "AS IS" BASIS,
+~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+~ See the License for the specific language governing permissions and
+~ limitations under the License.
+-->
+<routes xmlns="http://camel.apache.org/schema/spring"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring-2.18.1.xsd">
+  
+  <route id="petStoreApi">
+    <description>Swagger Pet Store API</description>
+    <from uri="cxfrs:{{api.base-path}}?bindingStyle=SimpleConsumer&amp;resourceClasses=org.apache.camel.examples.api.PetApi,org.apache.camel.examples.api.StoreApi,org.apache.camel.examples.api.UserApi&amp;features=#cxfFeatures&amp;providers=#cxfProviders"/>
+    <routingSlip>
+      <simple>direct:${headers[operationName]}</simple>
+    </routingSlip>
+  </route>
+  
+  <route id="petApi_addPet">
+    <description>Add a new pet to the store</description>
+    <from uri="direct:addPet"/>
+    <transacted/>
+    <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Adding pet with name: [${body.getName()}]"/>
+    <enrich shareUnitOfWork="true" strategyRef="categoryIdHeaderEnrichmentStrategy">
+      <constant>direct:upsertCategories</constant>
+    </enrich>
+    <enrich shareUnitOfWork="true" strategyRef="tagIdsHeaderEnrichmentStrategy">
+      <constant>direct:upsertTags</constant>
+    </enrich>
+    <enrich shareUnitOfWork="true" strategyRef="photoIdsHeaderEnrichmentStrategy">
+      <constant>direct:insertPhotos</constant>
+    </enrich>
+    <enrich shareUnitOfWork="true" strategyRef="petIdHeaderEnrichmentStrategy">
+      <constant>direct:insertPet</constant>
+    </enrich>
+    <enrich shareUnitOfWork="true" strategyRef="useOriginalAggretationStrategy">
+      <constant>direct:insertPetTagAss</constant>
+    </enrich>
+    <enrich shareUnitOfWork="true" strategyRef="useOriginalAggretationStrategy">
+      <constant>direct:insertPetPhotoAss</constant>
+    </enrich>
+    <transform>
+      <simple>${null}</simple>
+    </transform>
+  </route>
+  
+  <route id="petApi_upsertTags">
+    <description>Insert or update tags</description>
+    <from uri="direct:upsertTags"/>
+    <split parallelProcessing="false" shareUnitOfWork="true" strategyRef="listOfIdAggregationStrategy">
+      <simple>${body.getTags()}</simple>
+      <to uri="direct:upsertTag"/>
+    </split>
+  </route>
+  
+  <route id="petApi_upsertTag">
+    <description>Insert or update a single tag</description>
+    <from uri="direct:upsertTag"/>
+    <onException>
+      <exception>java.sql.SQLIntegrityConstraintViolationException</exception>
+      <handled>
+        <constant>true</constant>
+      </handled>
+      <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Tag already exists: [${body.getName()}]"/>
+      <to uri="sql:select ID from TAG where LTAG_NAME=:#${body.getName().toLowerCase()}?dataSource=#dataSource&amp;outputType=SelectOne"/>
+    </onException>
+    <setHeader headerName="CamelSqlRetrieveGeneratedKeys">
+      <constant>true</constant>
+    </setHeader>
+    <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Inserting tag: [${body.getName()}]"/>
+    <to uri="sql:insert into TAG (TAG_NAME, LTAG_NAME) values (:#${body.getName()}, :#${body.getName().toLowerCase()})?dataSource=#dataSource"/>
+    <transform>
+      <groovy>request.headers['CamelSqlGeneratedKeyRows'].get(0).get('GENERATED_KEY')</groovy>
+    </transform>
+  </route>
+  
+  <route id="petApi_upsertCategories">
+    <description>Insert or update categories</description>
+    <from uri="direct:upsertCategories"/>
+    <transform>
+      <simple>${body.getCategory()}</simple>
+    </transform>
+    <to uri="direct:upsertCategory"/>
+  </route>
+  
+  <route id="petApi_upsertCategory">
+    <description>Insert or update category</description>
+    <from uri="direct:upsertCategory"/>
+    <onException>
+      <exception>java.sql.SQLIntegrityConstraintViolationException</exception>
+      <handled>
+        <constant>true</constant>
+      </handled>
+      <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Category already exists: [${body.getName()}]"/>
+      <to uri="sql:select ID from CATEGORY where CATEGORY_NAME=:#${body.getName().toLowerCase()}?dataSource=#dataSource&amp;outputType=SelectOne"/>
+    </onException>
+    <setHeader headerName="CamelSqlRetrieveGeneratedKeys">
+      <constant>true</constant>
+    </setHeader>
+    <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Inserting category: [${body.getName()}]"/>
+    <to uri="sql:insert into CATEGORY (CATEGORY_NAME) values (:#${body.getName().toLowerCase()})?dataSource=#dataSource"/>
+    <transform>
+      <groovy>request.headers['CamelSqlGeneratedKeyRows'].get(0).get('GENERATED_KEY')</groovy>
+    </transform>
+  </route>
+  
+  <route id="petApi_insertPhotos">
+    <description>Insert photos</description>
+    <from uri="direct:insertPhotos"/>
+    <split parallelProcessing="false" shareUnitOfWork="true" strategyRef="listOfIdAggregationStrategy">
+      <simple>${body.getPhotoUrls()}</simple>
+      <to uri="direct:insertPhoto"/>
+    </split>
+  </route>
+  
+  <route id="petApi_insertPhoto">
+    <description>Insert or update category</description>
+    <from uri="direct:insertPhoto"/>
+    <setHeader headerName="CamelSqlRetrieveGeneratedKeys">
+      <constant>true</constant>
+    </setHeader>
+    <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Inserting photo url: [${body}]"/>
+    <to uri="sql:insert into PHOTO (PHOTO_URL) values (:#${body})?dataSource=#dataSource"/>
+    <transform>
+      <groovy>request.headers['CamelSqlGeneratedKeyRows'].get(0).get('GENERATED_KEY')</groovy>
+    </transform>
+  </route>
+  
+  <route id="petApi_insertPet">
+    <description>Insert pet</description>
+    <from uri="direct:insertPet"/>
+    <setHeader headerName="CamelSqlRetrieveGeneratedKeys">
+      <constant>true</constant>
+    </setHeader>
+    <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Inserting pet: [${body.getName()}]"/>
+    <to uri="sql:insert into PET (CATEGORY_ID, PET_NAME, STATUS) values (:#${headers[categoryId]}, :#${body.getName()}, :#${body.getStatus().toLowerCase()})?dataSource=#dataSource"/>
+    <transform>
+      <groovy>request.headers['CamelSqlGeneratedKeyRows'].get(0).get('GENERATED_KEY')</groovy>
+    </transform>
+  </route>
+  
+  <route id="petApi_insertPetTagAss">
+    <description>Insert pet/tag association</description>
+    <from uri="direct:insertPetTagAss"/>
+    <split parallelProcessing="false" shareUnitOfWork="true">
+      <simple>${headers[tagIds]}</simple>
+      <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Inserting pet/tag association: [${headers[petId]}/${body}]"/>
+      <to uri="sql:insert into PET_TAG_ASS (PET_ID, TAG_ID) values (:#${headers[petId]}, :#${body})?dataSource=#dataSource"/>
+    </split>
+  </route>
+  
+  <route id="petApi_insertPetPhotoAss">
+    <description>Insert pet/photo association</description>
+    <from uri="direct:insertPetPhotoAss"/>
+    <split parallelProcessing="false" shareUnitOfWork="true">
+      <simple>${headers[photoIds]}</simple>
+      <log logName="org.apache.camel.examples" loggingLevel="DEBUG" message="Inserting pet/photo association: [${headers[petId]}/${body}]"/>
+      <to uri="sql:insert into PET_PHOTO_ASS (PET_ID, PHOTO_ID) values (:#${headers[petId]}, :#${body})?dataSource=#dataSource"/>
+    </split>
+  </route>
+  
+  <route id="petApi_findPetsByStatus">
+    <description>Finds Pets by status</description>
+    <from uri="direct:findPetsByStatus"/>
+    <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Getting pet by status: [${headers[status]}]"/>
+    <filter>
+      <simple>${headers[status]} == ${null} || ${headers[status].empty} || ${headers[status]} == ''</simple>
+      <log logName="org.apache.camel.examples" loggingLevel="INFO" message="No status provided"/>
+      <setHeader headerName="CamelHttpResponseCode">
+        <constant>400</constant>
+      </setHeader>
+      <setHeader headerName="CamelHttpResponseText">
+        <constant>Invalid status value</constant>
+      </setHeader>
+      <stop/>
+    </filter>
+    <setHeader headerName="status">
+      <groovy>request.headers['status'].collect() { it.toLowerCase() }</groovy>
+    </setHeader>
+    <to uri="sql:select * from PET, CATEGORY, PET_TAG_ASS, TAG, PET_PHOTO_ASS, PHOTO where PET.STATUS in (:#in:status) and PET.CATEGORY_ID=CATEGORY.ID and PET.ID=PET_TAG_ASS.PET_ID and PET_TAG_ASS.TAG_ID=TAG.ID and PET.ID=PET_PHOTO_ASS.PET_ID and PET_PHOTO_ASS.PHOTO_ID=PHOTO.ID?dataSource=#dataSource&amp;outputType=SelectList"/>
+    <filter>
+      <simple>${body} == ${null} || ${body.empty}</simple>
+      <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Pets with status [${headers[status]}] not found"/>
+      <setHeader headerName="CamelHttpResponseText">
+        <constant/>
+      </setHeader>
+      <stop/>
+    </filter>
+    <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Pets with status [${headers[status]}] found"/>
+    <transform>
+      <groovy>request.body.groupBy() { it['ID'] }.values()</groovy>
+    </transform>
+    <split strategyRef="listOfPetAggregationStrategy">
+      <simple>${body}</simple>
+      <transform>
+        <groovy>resource:classpath:/META-INF/groovy/SqlResultToPet.groovy</groovy>
+      </transform>
+    </split>
+  </route>
+    
+  <route id="petApi_findPetsByTags">
+    <description>Finds Pets by tags</description>
+    <from uri="direct:findPetsByTags"/>
+    <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Getting pet by tags: [${headers[tags]}]"/>
+    <filter>
+      <simple>${headers[tags]} == ${null} || ${headers[tags].empty} || ${headers[tags]} == ''</simple>
+      <log logName="org.apache.camel.examples" loggingLevel="INFO" message="No tags provided"/>
+      <setHeader headerName="CamelHttpResponseCode">
+        <constant>400</constant>
+      </setHeader>
+      <setHeader headerName="CamelHttpResponseText">
+        <constant>Invalid tag value</constant>
+      </setHeader>
+      <stop/>
+    </filter>
+    <setHeader headerName="tags">
+      <groovy>request.headers['tags'].collect() { it.toLowerCase() }</groovy>
+    </setHeader>
+    <to uri="sql:select * from PET, CATEGORY, PET_TAG_ASS, TAG, PET_PHOTO_ASS, PHOTO where TAG.LTAG_NAME in (:#in:tags) and PET.CATEGORY_ID=CATEGORY.ID and PET.ID=PET_TAG_ASS.PET_ID and PET_TAG_ASS.TAG_ID=TAG.ID and PET.ID=PET_PHOTO_ASS.PET_ID and PET_PHOTO_ASS.PHOTO_ID=PHOTO.ID?dataSource=#dataSource&amp;outputType=SelectList"/>
+    <filter>
+      <simple>${body} == ${null} || ${body.empty}</simple>
+      <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Pets with tags [${headers[tags]}] not found"/>
+      <setHeader headerName="CamelHttpResponseText">
+        <constant/>
+      </setHeader>
+      <stop/>
+    </filter>
+    <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Pets with tags [${headers[tags]}] found"/>
+    <transform>
+      <groovy>request.body.groupBy() { it['ID'] }.values()</groovy>
+    </transform>
+    <split strategyRef="listOfPetAggregationStrategy">
+      <simple>${body}</simple>
+      <transform>
+        <groovy>resource:classpath:/META-INF/groovy/SqlResultToPet.groovy</groovy>
+      </transform>
+    </split>
+  </route>
+  
+  <route id="petApi_getPetById">
+    <from uri="direct:getPetById"/>
+    <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Getting pet by ID: [${headers[petId]}]"/>
+    <to uri="sql:select * from PET, CATEGORY, PET_TAG_ASS, TAG, PET_PHOTO_ASS, PHOTO where PET.ID=:#petId and PET.CATEGORY_ID=CATEGORY.ID and PET.ID=PET_TAG_ASS.PET_ID and PET_TAG_ASS.TAG_ID=TAG.ID and PET.ID=PET_PHOTO_ASS.PET_ID and PET_PHOTO_ASS.PHOTO_ID=PHOTO.ID?dataSource=#dataSource&amp;outputType=SelectList"/>
+    <filter>
+      <simple>${body} == ${null} || ${body.empty}</simple>
+      <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Pet [${headers[petId]}] not found"/>
+      <setHeader headerName="CamelHttpResponseCode">
+        <constant>404</constant>
+      </setHeader>
+      <setHeader headerName="CamelHttpResponseText">
+        <constant>Pet not found</constant>
+      </setHeader>
+      <stop/>
+    </filter>
+    <log logName="org.apache.camel.examples" loggingLevel="INFO" message="Pet [${headers[petId]}] found"/>
+    <transform>
+      <groovy>resource:classpath:/META-INF/groovy/SqlResultToPet.groovy</groovy>
+    </transform>
+  </route>
+
+</routes>

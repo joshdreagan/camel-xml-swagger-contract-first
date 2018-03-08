@@ -1,0 +1,33 @@
+spec:
+  template:
+    spec:
+      serviceAccountName: camel-xml-swagger-contract-first-sa
+      containers:
+      - name: camel-xml-swagger-contract-first
+        env:
+        - name: SPRING_CONFIG_LOCATION
+          value: file:/etc/config/
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: camel-xml-swagger-contract-first-secret
+              key: spring.datasource.username
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: camel-xml-swagger-contract-first-secret
+              key: spring.datasource.password
+        resources:
+          requests:
+            cpu: "1.0"
+          limits:
+            cpu: "4.0"
+        volumeMounts:
+        - name: camel-xml-swagger-contract-first-configmap-vol
+          mountPath: /etc/config
+          readOnly: true
+      volumes:
+      - name: camel-xml-swagger-contract-first-configmap-vol
+        configMap:
+          name: camel-xml-swagger-contract-first-configmap
+            
