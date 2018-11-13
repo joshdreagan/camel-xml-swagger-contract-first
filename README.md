@@ -98,7 +98,7 @@ $ oc secrets add sa/camel-xml-swagger-contract-first-sa secret/camel-xml-swagger
 Add the view role to the [ServiceAccount](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/):
 
 ```
-$ oc policy add-role-to-user view system:serviceaccount:camel-xml-swagger-contract-first:camel-xml-swagger-contract-first-sa
+$ oc policy add-role-to-user view system:serviceaccount:demo-fuse:camel-xml-swagger-contract-first-sa
 ```
 
 The example can be built and run on OpenShift using the following goals:
